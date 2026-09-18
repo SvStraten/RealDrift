@@ -30,8 +30,6 @@ RealDrift/
 │   └── bpic2012_config.yaml
 ├── outputs/                      # Generated logs, ground truth, and figures land here
 ├── generate_drift_log.py         # Orchestrator, run this to generate a log
-├── test_pipeline.ipynb           # Runs and asserts on every step, on real data
-├── reproduce_bpic12_paper.ipynb  # Reproduces Figure 4 and the three composition tiers
 ├── requirements.txt
 └── README.md
 ```
