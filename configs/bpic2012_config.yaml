@@ -1,0 +1,7 @@
+dataset: bpic12
+sublogs_dir: data/sublogs
+concept_pools_dir: data/concept_pools
+t0: "2012-01-01 00:00:00"
+use_atkde: True   # set true to use the AT-KDE global/weekday/time-of-day arrival model
+                    # (external/AT-KDE/) instead of the flat-KDE fallback. Adds a one-time
+                    # cost per concept (~30-40s for the first sample, cached after that).
