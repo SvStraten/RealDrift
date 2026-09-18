@@ -111,7 +111,7 @@ Output lands in `outputs/`, the composed log (`*_drift_log.csv`), ground-truth t
 |---|---|
 | [pix-framework](https://github.com/AutomatedProcessImprovement/pix-framework) | Case-level attribute discovery | 
 | [AT-KDE](https://github.com/konradoezdemir/AT-KDE) | Arrival modeling | 
-| [TF-Decoder] (https://github.com/perdikon/TF-decoder) | Trace pool generation | 
+| [TF-Decoder](https://github.com/perdikon/TF-decoder) | Trace pool generation | 
 | [PELT](https://github.com/niklasadams/explainable_concept_drift_pm) (PELT) | Drift detection baseline | 
 | [Version Clustering (VC)](https://gitlab.cs.univie.ac.at/bernolda00cs/version-clustering-cdd) (VC) | Drift detection baseline | 
 | [COMPASS](https://github.com/SvStraten/COMPASS) | Continual learning baseline | 
