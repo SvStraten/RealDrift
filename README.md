@@ -105,33 +105,13 @@ Output lands in `outputs/`, the composed log (`*_drift_log.csv`), ground-truth t
 
 ---
 
-## Reproducing the Paper
-
-```bash
-jupyter nbconvert --to notebook --execute --inplace reproduce_bpic12_paper.ipynb
-jupyter nbconvert --to notebook --execute --inplace test_pipeline.ipynb
-```
-
-Both take a few minutes to run top to bottom. The first reproduces Figure 4 (clustering) and the recurrent/sudden/gradual composition tiers, the second runs and asserts on every pipeline step against real data.
-
----
-
 ## External Repositories
 
-| Repository | Used for | Required? |
-|---|---|---|
-| [pix-framework](https://github.com/AutomatedProcessImprovement/pix-framework) | Case-level attribute discovery | No, Python <3.12 only, else falls back |
-| [AT-KDE](https://github.com/konradoezdemir/AT-KDE) | Arrival modeling | No, flat-KDE is the default |
-| TF-decoder (Perdikogiannis et al., BPM, to appear) | Trace pool generation | No, only to regenerate `data/concept_pools/` |
-| [PELT](https://github.com/niklasadams/explainable_concept_drift_pm) (PELT) | Drift detection baseline | Only for reproducing Table 3 |
-| [Version Clustering (VC)](https://gitlab.cs.univie.ac.at/bernolda00cs/version-clustering-cdd) (VC) | Drift detection baseline | Only for reproducing Table 3 |
-| [COMPASS](https://github.com/SvStraten/COMPASS) | Continual learning baseline | Only for reproducing Figure 5 |
-
-None of the last three are called by this repo, they consume its output as their own input. AT-KDE setup:
-
-```bash
-git clone https://github.com/konradoezdemir/AT-KDE.git external/AT-KDE
-pip install KDEpy
-```
-
-Already patched for NumPy 2.x in the vendored copy, if you clone fresh, replace `np.infty` with `np.inf` in `source/iat_approaches/kde.py` and `diagnostics/eval_event_logs.py`.
+| Repository | Used for |
+|---|---|
+| [pix-framework](https://github.com/AutomatedProcessImprovement/pix-framework) | Case-level attribute discovery | 
+| [AT-KDE](https://github.com/konradoezdemir/AT-KDE) | Arrival modeling | 
+| [TF-Decoder] (https://github.com/perdikon/TF-decoder) | Trace pool generation | 
+| [PELT](https://github.com/niklasadams/explainable_concept_drift_pm) (PELT) | Drift detection baseline | 
+| [Version Clustering (VC)](https://gitlab.cs.univie.ac.at/bernolda00cs/version-clustering-cdd) (VC) | Drift detection baseline | 
+| [COMPASS](https://github.com/SvStraten/COMPASS) | Continual learning baseline | 
