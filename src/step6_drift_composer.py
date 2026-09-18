@@ -1,31 +1,3 @@
-"""
-step6_drift_composer.py
-
-Resource-calendar discovery format conversion, the feasibility predicate
-Feasible() (subsection 4.4), and drift-stream composition (subsection
-4.5): greedy placement with preemption, followed by simulated-annealing
-refinement.
-
-Composition follows one procedure; what varies between runs is which
-task instances are chained in what order, and each transition's type
-(sudden or gradual). "Recurrent" is not a third drift type, it is a
-structural property: the same task's pool used more than once as an
-independently-seeded instance, matching the `rank{i}{A,B}.csv` naming
-(rank{i} = task T_i's pool, A/B = two independently-seeded instances of
-that task).
-
-Notes:
-
-  1. Per-instance arrival clocks are lazily anchored: an instance's own
-     arrival model only starts ticking once that instance is first drawn
-     from, anchored at the composer's current position at that moment,
-     not from the global t0. This mirrors atkde_adapter.py's own
-     lazy-anchoring design.
-  2. The per-resource occupancy structure is kept sorted by start time,
-     and feasibility checks use bisect to find the small neighborhood of
-     entries that could overlap a candidate event, rather than scanning
-     the full history for that resource (see feasible()'s own docstring).
-"""
 from __future__ import annotations
 
 import bisect
@@ -37,16 +9,11 @@ import pandas as pd
 
 from step5_arrival_time_modeling import make_gap_source
 
-# --------------------------------------------------------------------------
-# Section 4.1 -- resource calendar discovery
-# --------------------------------------------------------------------------
-
 SLOT_MINUTES_DEFAULT = 60
 N_SLOTS = (7 * 24 * 60) // SLOT_MINUTES_DEFAULT
 
 
 def _week_slot(ts, slot_minutes=SLOT_MINUTES_DEFAULT):
-    """Weekly slot index (Monday 00:00 = slot 0), independent of calendar date."""
     minutes_into_week = ts.weekday() * 24 * 60 + ts.hour * 60 + ts.minute
     return int(minutes_into_week // slot_minutes) % ((7 * 24 * 60) // slot_minutes)
 
@@ -55,29 +22,6 @@ def discover_resource_calendars(real_log_df, case_col, act_col, time_col, res_co
                                   complete_col=None, slot_minutes=SLOT_MINUTES_DEFAULT,
                                   min_weeks_active_frac=0.10, min_events_for_own_calendar=30,
                                   default_event_minutes=15, verbose=True):
-    """Weekly availability calendar per resource (subsection 4.1),
-    a simpler slot-hit-count alternative to step2_resource_calendars.py's
-    confidence/support method. Assumes paired (case, activity, resource,
-    start, complete) tuples when `complete_col` is given; otherwise falls
-    back to a heuristic duration (gap to the next event in the same case,
-    capped at `default_event_minutes`).
-
-    Resources with fewer than `min_events_for_own_calendar` total events
-    are pooled into a shared calendar per activity.
-
-    Returns (calendars, pooled_resources):
-      calendars        - {key: set(slot_indices)}, key = resource name, or
-                          "activity::<name>" for pooled resources
-      pooled_resources  - set of resource names that got pooled
-
-    If `res_col` is None or not present in the log, calendar discovery
-    has nothing to discover from and returns ({}, set()) with a printed
-    warning. Downstream, `feasible()`/`_in_calendar()` treat an
-    unknown/missing calendar key as "no calendar info, do not block",
-    and `_event_specs()` skips events with no resource, so composition
-    degrades gracefully to running without any resource-based
-    constraint.
-    """
     if res_col is None or res_col not in real_log_df.columns:
         if verbose:
             print(f"  no resource column detected -- skipping calendar discovery entirely; "
@@ -103,9 +47,6 @@ def discover_resource_calendars(real_log_df, case_col, act_col, time_col, res_co
     threshold = max(1, min_weeks_active_frac * span_weeks)
 
     slot_hits = defaultdict(lambda: defaultdict(int))
-    # itertuples() mangles column names with ':' in them into invalid attribute
-    # names -- use .to_dict('records') instead so arbitrary XES-style column
-    # names (case:concept:name, org:resource, ...) work unmodified
     for row in df[[case_col, act_col, time_col, res_col, "_dur_min"]].to_dict("records"):
         res = row[res_col]
         if res is None or (isinstance(res, float) and pd.isna(res)):
@@ -133,16 +74,11 @@ def _in_calendar(ts, resource, activity, calendars, pooled_resources, slot_minut
     key = resource if resource not in pooled_resources else f"activity::{activity}"
     cal = calendars.get(key)
     if cal is None:
-        return True  # no calendar info for this resource -- documented: don't block on unknowns
+        return True 
     return _week_slot(ts, slot_minutes) in cal
 
 
-# --------------------------------------------------------------------------
-# Section 4.4 -- feasibility (global condition G)
-# --------------------------------------------------------------------------
-
 def _event_specs(case, default_event_minutes=15):
-    """(offset_s, activity, resource, duration_s) for every resourced event in a case."""
     offs, acts, ress = case["offsets"], case["activities"], case["resources"]
     specs = []
     for i, (o, a, r) in enumerate(zip(offs, acts, ress)):
@@ -157,41 +93,6 @@ def _event_specs(case, default_event_minutes=15):
 def feasible(case, t0, occupancy, calendars, pooled_resources, resource_cap=1,
              default_event_minutes=15, slot_minutes=SLOT_MINUTES_DEFAULT,
              bed_occupancy=None, max_beds=None):
-    """Feasible(c, t0 | G, S), subsection 4.4 -- checked against every
-    event of `case`, not only its first, since a resource conflict
-    several events into a case is as much a violation of G as one at
-    case start.
-
-    t0: pd.Timestamp candidate start time.
-    occupancy: {resource: [(start_ts, end_ts, owner_case_id), ...]} of
-      already-committed events, the per-resource condition. Must be kept
-      sorted by start_ts (commit()/uncommit() below maintain this
-      invariant); this function bisects to the small neighborhood of
-      entries that could overlap a candidate event, rather than scanning
-      every event ever committed to that resource. Since _event_specs()
-      bounds every event's duration to at most default_event_minutes,
-      only committed events whose own start falls within one
-      default_event_minutes window of the candidate's [ts, end) can
-      possibly overlap it, so bisect finds that window in O(log n)
-      instead of an O(n) scan.
-    bed_occupancy / max_beds: optional log-wide capacity condition (e.g.
-      the number of beds in a hospital, imposing a capacity limit on how
-      many cases may draw on it at once). Unlike the resource conditions,
-      this is case-level, not event-level: a case occupies "a bed" for
-      its whole span (first event to last event), and adding it must not
-      push the number of concurrently active cases, log-wide across
-      every task/instance, above max_beds at any point during that span.
-      bed_occupancy: list of (start_ts, end_ts, owner_case_id) for every
-      already-committed case's span, also kept sorted by start_ts. A
-      case's span is not bounded the way a single event's duration is,
-      so this bisects only the lower edge and scans forward from there.
-      Both must be given together; if either is None, the bed condition
-      is skipped.
-
-    Returns (is_feasible: bool, blocking: set of owner_case_ids, either
-    resource- or bed-blocking, used by the caller to find preemption
-    candidates when infeasible).
-    """
     specs = _event_specs(case, default_event_minutes)
     blocking = set()
     ok = True
@@ -214,9 +115,6 @@ def feasible(case, t0, occupancy, calendars, pooled_resources, resource_cap=1,
         case_start = t0
         case_end = t0 + pd.to_timedelta(case.get("duration", 0.0), unit="s")
         lo = bisect.bisect_left(bed_occupancy, case_end, key=lambda iv: iv[0])
-        # entries at index >= lo start after case_end and cannot overlap it, so this
-        # trims the upper end of the scan; cases can be arbitrarily long, so the lower
-        # portion is still scanned in full
         bed_overlapping = [(bs, be, owner) for (bs, be, owner) in bed_occupancy[:lo]
                             if bs < case_end and case_start < be]
         if len(bed_overlapping) >= max_beds:
@@ -240,11 +138,6 @@ def commit(case, t0, occupancy, placed, default_event_minutes=15, bed_occupancy=
 
 
 def uncommit(case_id, occupancy, placed, bed_occupancy=None):
-    """Removes case_id from occupancy/bed_occupancy/placed. Only touches
-    the resources this case actually used (via its own event specs)
-    rather than every resource in occupancy. Each touched resource's list
-    stays sorted by start_ts (a
-    filter preserves order), maintaining feasible()'s bisect invariant."""
     case, _ = placed.pop(case_id)
     for r in {spec[2] for spec in _event_specs(case)}:
         if r in occupancy:
@@ -253,16 +146,7 @@ def uncommit(case_id, occupancy, placed, bed_occupancy=None):
         bed_occupancy[:] = [iv for iv in bed_occupancy if iv[2] != case_id]
     return case
 
-
-# --------------------------------------------------------------------------
-# Section 4.5 -- drift stream composition
-# --------------------------------------------------------------------------
-
 class TaskInstance:
-    """One occurrence of a task's pool in the composed sequence (Sec 4.5).
-    Carries the task's arrival model f_i and a priority equal to its
-    position in the sequence (not its task identity) -- so a later instance
-    of the SAME task still outranks an earlier instance of a DIFFERENT task."""
 
     def __init__(self, label, task_id, pool, gap_source, priority, seed=0):
         rng = np.random.default_rng(seed)
@@ -291,35 +175,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
                               resource_cap=1, default_event_minutes=15,
                               slot_minutes=SLOT_MINUTES_DEFAULT, seed=0, verbose=True,
                               max_beds=None):
-    """Subsection 4.5: draws one candidate at a time, cycling through
-    instances as their pools empty; the transition type is realized via
-    the selection rule; feasibility is checked with preemption (evict a
-    small set of blocking lower-priority committed cases and reschedule
-    them) or a bounded forward search; a case is excluded if neither
-    succeeds.
-
-    instances: list of TaskInstance, in sequence order.
-    drift_types: len(instances)-1 list of 'sudden'/'gradual'.
-    t0: pd.Timestamp, overall stream start, used to anchor the first
-        instance's arrival clock (later instances anchor lazily to
-        wherever the composer's wall-clock is when first drawn from, see
-        TaskInstance).
-    max_beds: optional int, a global bed-capacity condition. If given, a
-        case is only feasible if committing it would not push the number
-        of concurrently active cases (log-wide, across every instance,
-        not per-resource) above max_beds at any point during the case's
-        own span. Preemption/eviction and the bounded forward search
-        both respect this the same way they respect resource conditions.
-        None (default) means no bed constraint.
-
-    Returns (placed: {case_id: (case, t)}, excluded: [case], transition_log,
-             occupancy, raw_targets: {case_id: pd.Timestamp}, bed_occupancy).
-             raw_targets is each case's arrival-model-sampled time before
-             any feasibility delay, eviction, or search, the target
-             sa_refine floors against, not the stage-1 committed time.
-             bed_occupancy is returned so sa_refine
-             can respect the same bed constraint during refinement.
-    """
     rng = np.random.default_rng(seed)
     placed = {}
     excluded = []
@@ -329,19 +184,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
     raw_targets = {}
 
     def find_feasible_or_evict(case, target_t, active_idx):
-        """Try target_t; if infeasible, try evicting a small set of blocking
-        cases from a lower-priority instance; else search forward within
-        horizon_days; else return None (case excluded).
-
-        Commits `case` itself in every success path rather than leaving
-        that to the caller. This matters for the eviction path
-        specifically: evicted cases are rescheduled via a search that
-        needs to see the evictor's own span already reserved in
-        occupancy/bed_occupancy, or they can be placed right back into
-        overlap with it, which would let final concurrent-case counts
-        exceed a configured bed cap even though every individual
-        feasibility check passed.
-        """
         ok, blocking = feasible(case, target_t, occupancy, calendars, pooled_resources,
                                  resource_cap, default_event_minutes, slot_minutes,
                                  bed_occupancy, max_beds)
@@ -352,26 +194,14 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
         lower_priority_blockers = {cid for cid in blocking
                                     if cid in placed and placed[cid][0]["_instance_priority"] < instances[active_idx].priority}
         if lower_priority_blockers and len(lower_priority_blockers) <= max_preempt_evictions:
-            # save (case, original_t) BEFORE uncommitting -- placed[cid] is gone after
-            # uncommit(), so this is the only chance to remember where to restore to
-            # if the eviction attempt turns out not to help
             originals = {cid: placed[cid] for cid in lower_priority_blockers}
             evicted = {cid: uncommit(cid, occupancy, placed, bed_occupancy) for cid in lower_priority_blockers}
             ok2, _ = feasible(case, target_t, occupancy, calendars, pooled_resources,
                                resource_cap, default_event_minutes, slot_minutes,
                                bed_occupancy, max_beds)
             if ok2:
-                # commit the EVICTOR first, before rescheduling the evicted
-                # cases -- see docstring above for why this ordering matters
                 commit(case, target_t, occupancy, placed, default_event_minutes, bed_occupancy)
                 for cid, ev_case in evicted.items():
-                    # search forward from whichever is LATER: the evictor's
-                    # target, or the evicted case's own raw sampled target --
-                    # searching from just target_t alone can reschedule the
-                    # evicted case to a time before its own floor if the
-                    # evictor's target happens to be earlier, since a later
-                    # event in the evicted case (not its anchor) can be what
-                    # actually conflicted.
                     not_before = max(target_t, raw_targets.get(cid, target_t))
                     ev_t = _reschedule_earliest_feasible(ev_case, not_before, occupancy, calendars,
                                                           pooled_resources, resource_cap,
@@ -382,8 +212,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
                     else:
                         excluded.append(ev_case)
                 return target_t
-            # eviction didn't actually free things up (e.g. blocked by calendar too) --
-            # restore evicted cases to their ORIGINAL committed time, not target_t
             for cid, ev_case in evicted.items():
                 _, original_t = originals[cid]
                 commit(ev_case, original_t, occupancy, placed, default_event_minutes, bed_occupancy)
@@ -404,7 +232,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
         dtype = drift_types[active] if active < len(drift_types) else None
 
         while len(inst) > 0:
-            # --- selection rule realizing drift_j ---
             draw_from = inst
             if dtype == "gradual" and active + 1 < len(instances):
                 r_j = len(inst)
@@ -412,7 +239,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
                     p_next = 1 - r_j / w
                     if rng.random() < p_next:
                         draw_from = instances[active + 1]
-            # sudden: instance j+1 never drawn from until instance j is fully empty (handled by outer loop)
 
             if len(draw_from) == 0:
                 draw_from = inst
@@ -424,21 +250,10 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
             case["_instance_priority"] = draw_from.priority
             case["concept"] = draw_from.label
 
-            # Anchor this instance's clock: its own last tick if it has
-            # ticked before; otherwise the composer's current progression
-            # (composer_clock, tracked from the latest committed time
-            # across all instances so far), not t0. A brand-new instance
-            # starting to contribute (e.g. C2 right after C1's queue
-            # drains under a sudden transition) has never ticked, so its
-            # clock is None, and must anchor to composer_clock rather
-            # than restarting at the beginning of the stream.
             anchor = draw_from.clock or composer_clock
             target_t = draw_from.advance_clock(rng, anchor)
             raw_targets[case["_instance_case_key"]] = target_t
 
-            # find_feasible_or_evict already commits `case` on success (see its
-            # docstring) -- do NOT commit again here, that would double-insert
-            # into occupancy/bed_occupancy and corrupt the capacity accounting.
             final_t = find_feasible_or_evict(case, target_t, instances.index(draw_from))
             if final_t is not None:
                 composer_clock = max(composer_clock, final_t)
@@ -451,11 +266,6 @@ def compose_polydrift_stream(instances, drift_types, calendars, pooled_resources
                 excluded.append(case)
 
         if dtype is not None and active + 1 < len(instances):
-            # ground-truth transition instant: [last time the draining instance
-            # contributed a case, first time the next instance did] -- degenerates
-            # to a single instant for 'sudden' (next instance's first commit only
-            # happens once the draining one is fully empty, so these coincide or
-            # sit right next to each other); for 'gradual' this is a genuine window.
             next_label = instances[active + 1].label
             transition_log.append({
                 "from": inst.label, "to": next_label, "type": dtype,
@@ -495,62 +305,17 @@ def _reschedule_earliest_feasible(case, not_before_t, occupancy, calendars, pool
                             resource_cap, default_event_minutes, slot_minutes, horizon_days,
                             bed_occupancy, max_beds)
 
-
-# --------------------------------------------------------------------------
-# Section 4.5 -- simulated annealing refinement (second stage)
-# --------------------------------------------------------------------------
-
 def sa_refine(placed, raw_targets, occupancy, calendars, pooled_resources, resource_cap=1,              default_event_minutes=15, slot_minutes=SLOT_MINUTES_DEFAULT,
               n_iterations=2000, sample_frac=1.0, t0_temp=3600.0, cooling=0.995,
               seed=0, verbose=True, bed_occupancy=None, max_beds=None,
               horizon_days=21, shift_minutes_floor=30, shift_scale_frac=0.15):
-    """Subsection 4.5, second stage: simulated annealing (Bertsimas &
-    Tsitsiklis 1993), restricted to moves within a single task instance.
-    Shift/swap/snap moves on sampled cases, each floored at its own
-    originally-sampled target (delay only, never earliness). A move is
-    accepted if it reduces total delay, else accepted with probability
-    exp(-delta/T); T decays geometrically.
-
-    Move types:
-
-      1. 'shift' scales its candidate window with the case's own current
-         delay (shift_scale_frac of it, floored at shift_minutes_floor
-         minutes), so a case delayed by 10 days gets a much wider
-         candidate window than one delayed by 20 minutes.
-      2. 'snap': uncommit the case and run the same bounded forward
-         search the greedy stage uses (_search_forward), starting from
-         the case's own raw target instead of its current position.
-         Since other cases may have moved since stage 1 committed this
-         one, the earliest feasible slot from the case's own target can
-         be earlier than where stage 1 first found room for it. This is
-         accepted greedily (if feasible and no worse) rather than via
-         the Metropolis criterion, since it is already an expensive
-         deterministic search rather than a random perturbation.
-
-    raw_targets: {case_id: pd.Timestamp} from compose_polydrift_stream,
-    each case's arrival-model-sampled time before any stage-1 delay.
-    This, not the stage-1 committed time, is the target every move must
-    floor against; using the stage-1 output would re-baseline delay
-    against an already-delayed time and understate it.
-
-    bed_occupancy / max_beds: same bed-capacity condition as
-    compose_polydrift_stream. Pass the bed_occupancy list returned by
-    that call (not a fresh one) so SA's moves are checked against the
-    same log-wide state stage 1 already built, and max_beds must match
-    what was used there. A move that would violate the bed cap is
-    rejected the same way a resource-infeasible move already is.
-
-    horizon_days: bound for the 'snap' move's forward search, same
-    parameter compose_polydrift_stream's stage 1 uses.
-
-    Returns updated `placed` dict (in place) and total delay reduction (s).
-    """
+    
     rng = np.random.default_rng(seed)
     by_instance = defaultdict(list)
     original_target = {}
     for cid, (case, t) in placed.items():
         by_instance[case["concept"]].append(cid)
-        original_target[cid] = raw_targets.get(cid, t)  # fall back to t only if truly untracked
+        original_target[cid] = raw_targets.get(cid, t)  
 
     def total_delay():
         return sum((placed[cid][1] - original_target[cid]).total_seconds() for cid in placed
@@ -611,14 +376,6 @@ def sa_refine(placed, raw_targets, occupancy, calendars, pooled_resources, resou
                 continue
             other_case, other_t = placed[other_cid]
             a_case, a_t = case, cur_t
-
-            # HARD floor check before attempting the swap -- a swap that
-            # would place either case earlier than its own raw sampled
-            # target is not a candidate move at all (delay only, never
-            # earliness). The delay_before/delay_after computation below
-            # clamps the delay metric to zero, which is not the same as
-            # forbidding the move; this floor check is what actually
-            # prevents it.
             if other_t < original_target[cid] or a_t < original_target[other_cid]:
                 continue
 
@@ -627,13 +384,6 @@ def sa_refine(placed, raw_targets, occupancy, calendars, pooled_resources, resou
             ok_a, _ = feasible(a_case, other_t, occupancy, calendars, pooled_resources,
                                 resource_cap, default_event_minutes, slot_minutes,
                                 bed_occupancy, max_beds)
-            # a_case is tentatively committed at other_t before checking ok_b, so
-            # B's feasibility check sees A's new position too -- checking both
-            # cases against occupancy while both are still uncommitted would let
-            # each look individually feasible against "everyone else" while
-            # conflicting with each other post-swap. The tentative commit is
-            # undone either way; the actual commit (of both, or neither) happens
-            # below once the accept/reject decision is made.
             ok_b = False
             if ok_a:
                 commit(a_case, other_t, occupancy, placed, default_event_minutes, bed_occupancy)
@@ -667,20 +417,6 @@ def sa_refine(placed, raw_targets, occupancy, calendars, pooled_resources, resou
 
 
 def recompute_transition_log(placed, transition_log):
-    """Recomputes each transition's timestamp from the actual final case
-    placements in `placed`, after sa_refine has run.
-
-    The drift point is when the new ('to') concept starts flowing in,
-    the first arrival of any case belonging to that concept, read from
-    the actual post-refinement placements (sa_refine can shift which
-    case ends up first for a concept, so a pre-refinement snapshot can
-    go stale). start_ts and end_ts are both set to this single point
-    (kept as two fields for compatibility with downstream code that
-    expects a window, but they are always equal). A transition is the
-    moment the incoming concept begins, not tied to when the outgoing
-    concept's lingering long-running cases happen to finish generating
-    events, which is a separate question.
-    """
     first_ts_by_label = {}
     for cid, (case, t) in placed.items():
         lbl = case["concept"]
@@ -692,11 +428,6 @@ def recompute_transition_log(placed, transition_log):
         drift_ts = first_ts_by_label.get(tr["to"])
         fixed.append({**tr, "start_ts": drift_ts, "end_ts": drift_ts})
     return fixed
-
-
-# --------------------------------------------------------------------------
-# Export
-# --------------------------------------------------------------------------
 
 def build_log_df_polydrift(placed, case_col="case:concept:name", act_col="concept:name",
                             time_col="time:timestamp", res_col="org:resource"):

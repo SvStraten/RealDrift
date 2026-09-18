@@ -1,50 +1,3 @@
-"""
-step4_trace_pool_generation.py
-
-Standalone script that trains (or resumes) the TF-decoder model for every
-concept ("rank") of BOTH BPIC12 and Emergency, and generates synthetic traces
-from each, using the per-concept datasets under
-    ../data_bpic12_rank{1..N}/bpic2012_a/...
-    ../data_emergency_rank{1..M}/emergency_ORT/...
-(built by prepare_concept_datasets.py from the clustering step's
-per-concept sublogs + case_concepts.csv files).
-
-Notes vs. the upstream TF-decoder training script:
--------------------------------------------------
-1. VAE import fixed: configs/model/tf_decoder.yaml instantiates
-   `src.models.components.cvae.vae2.VAE`, not `.vae.VAE`. The upstream
-   script imported and source-checked `vae.VAE.decode`, the wrong class,
-   whose decode() does not forward kwargs (`return self.decoder(z, c)`),
-   so the startup assertion would always fail. `vae2.VAE.decode` already
-   forwards kwargs correctly, so fixing the import is sufficient.
-2. Works for both datasets: build_datamodule() picks configs/data/bpic.yaml
-   or configs/data/emergency.yaml, and the main loop iterates over every
-   discovered rank of every requested dataset.
-3. num_traces is read directly from the number of unique cases in that
-   rank's own full CSV, i.e. always equal to the total number of traces
-   in that concept's sublog.
-4. c_dim is data-driven, not hardcoded. configs/model/tf_decoder.yaml sets
-   vae.c_dim=2 assuming a binary label. Some concepts are single-label
-   once split, which would mismatch a hardcoded c_dim=2. c_dim is set
-   from the actual number of distinct labels found in each rank's data
-   before the model is instantiated.
-5. max_trace_length is data-driven per rank. Some concepts have traces
-   well over the class defaults (100 for BPIC, 50 for Emergency), e.g.
-   up to 175 events for one BPIC12 concept. Traces longer than
-   max_trace_length are silently truncated by GenericDataset, so this is
-   computed from the data and passed in per rank.
-6. Checkpoints/logs/generated CSVs are namespaced by dataset and rank
-   (training_runs/{dataset}/rank{rank}/..., generated_{dataset}_rank{rank}.csv)
-   so BPIC12 and Emergency (and their same-numbered ranks) can't collide.
-
-Run from the command line (after loading the right module/env), e.g.:
-    module load Python/3.12.3-GCCcore-13.3.0
-    module load CUDA/12.1.1
-    python step4_trace_pool_generation.py
-    python step4_trace_pool_generation.py --datasets bpic12
-    python step4_trace_pool_generation.py --datasets emergency --ranks 1,3
-"""
-
 import sys
 import os
 import re
@@ -87,9 +40,6 @@ if torch.cuda.is_available():
 print(f"Using seed: {SEED}")
 
 
-# ---------------------------------------------------------------------------
-# Setup: repo path
-# ---------------------------------------------------------------------------
 REPO_PATH = os.path.abspath(args.repo_path)
 assert os.path.isdir(os.path.join(REPO_PATH, "src")), f"src/ not found under {REPO_PATH} -- check --repo-path"
 
@@ -103,9 +53,6 @@ print("cwd:", os.getcwd())
 print("data root:", DATA_ROOT)
 
 
-# ---------------------------------------------------------------------------
-# PyTorch 2.6+ checkpoint loading patch (your own trusted checkpoints)
-# ---------------------------------------------------------------------------
 _original_load = torch.load
 def _patched_load(*load_args, **load_kwargs):
     load_kwargs["weights_only"] = False   # force override, not setdefault
@@ -115,9 +62,7 @@ torch.load = _patched_load
 import hydra
 from omegaconf import OmegaConf
 from lightning import Trainer
-from models.components.cvae.vae2 import VAE  # NOTE: vae2, not vae -- matches
-                                               # configs/model/tf_decoder.yaml's
-                                               # _target_: src.models.components.cvae.vae2.VAE
+from models.components.cvae.vae2 import VAE  
 
 _decode_src = inspect.getsource(VAE.decode)
 assert "self.decoder(z, c" in _decode_src and "**kwargs" in _decode_src, (
@@ -127,9 +72,6 @@ assert "self.decoder(z, c" in _decode_src and "**kwargs" in _decode_src, (
 print("Confirmed: VAE.decode (vae2) forwards kwargs to the decoder (beam search fix is active).")
 
 
-# Per-dataset config: which data/*.yaml to use, and the fixed subfolder name
-# BPICDataModule/EmergencyORTDataModule/SepsisDataModule hardcode internally
-# (data_dir/<this>/...).
 DATASET_CONFIG = {
     "bpic12": {"data_yaml": "configs/data/bpic.yaml", "subfolder": "bpic2012_a"},
     "emergency": {"data_yaml": "configs/data/emergency.yaml", "subfolder": "emergency_ORT"},
@@ -152,8 +94,6 @@ def count_cases_in_full_csv(dataset: str, rank: int, data_root: str = DATA_ROOT)
     cfg = DATASET_CONFIG[dataset]
     csv_path = os.path.join(data_root, f"data_{dataset}_rank{rank}", cfg["subfolder"],
                              f"{cfg['subfolder']}.csv")
-    # keep_default_na=False: Sepsis case IDs include "NA" (a real case, not a
-    # missing value) -- pandas would otherwise silently drop it, undercounting.
     df = pd.read_csv(csv_path, sep=";", usecols=["Case ID"], keep_default_na=False, na_values=[])
     return df["Case ID"].nunique()
 
@@ -178,17 +118,11 @@ def build_datamodule(dataset: str, rank: int, data_root: str = DATA_ROOT):
 
 
 def build_model(num_labels: int):
-    """Instantiates the TF-decoder model with c_dim set to the actual
-    number of distinct labels in this rank's data."""
     model_cfg = OmegaConf.load("configs/model/tf_decoder.yaml")
     OmegaConf.set_struct(model_cfg, False)
     model_cfg.vae.c_dim = max(num_labels, 1)
     return hydra.utils.instantiate(model_cfg)
 
-
-# ---------------------------------------------------------------------------
-# Checkpoint helpers
-# ---------------------------------------------------------------------------
 def get_latest_checkpoint(dataset: str, rank: int):
     pattern = f"training_runs/{dataset}/rank{rank}/lightning_logs/version_*/checkpoints/*.ckpt"
     ckpts = glob.glob(pattern)
@@ -203,28 +137,11 @@ def epoch_of_checkpoint(ckpt_path):
 
 
 def fix_device_attrs(module, device):
-    """Recursively fix any stale `self.device` attributes that don't track .to()."""
     for m in module.modules():
         if hasattr(m, "device") and isinstance(getattr(m, "device"), torch.device):
             m.device = device
 
-
-# ---------------------------------------------------------------------------
-# Constrained activity decoding
-# ---------------------------------------------------------------------------
 def constrained_activity_sequence(act_logits, activity_names, w_activities, eot_name="EOT"):
-    """
-    act_logits: [seq_len, n_activities] logits for ONE case -- the winning
-        beam's per-step logits when beam search is active.
-    Returns chosen vocab indices, guaranteed to respect START/COMPLETE
-    alternation for every W_* activity: no re-opening an activity already
-    open, no closing one never opened.
-
-    For datasets with no W_* activities at all (e.g. Emergency, whose
-    activities have no '-START'/'-COMPLETE' suffix), w_activities is simply
-    empty and this constraint is a no-op -- decoding falls back to plain
-    argmax, exactly as intended.
-    """
     seq_len = act_logits.shape[0]
     open_acts = set()
     chosen = []
@@ -280,10 +197,6 @@ def check_alternation(activity_token_names, w_activities):
                 return False
     return True
 
-
-# ---------------------------------------------------------------------------
-# Trace generation
-# ---------------------------------------------------------------------------
 def generate_n_traces(lightning_module, datamodule, num_traces: int,
                        use_beam_search: bool = True, beam_size: int = 4, batch_size: int = 256,
                        max_gap_minutes: float = 60 * 24 * 14):
@@ -384,10 +297,6 @@ def generate_n_traces(lightning_module, datamodule, num_traces: int,
           f"({n_wellformed/num_traces*100:.1f}%)")
     return df
 
-
-# ---------------------------------------------------------------------------
-# Main: train (or resume) + generate for each concept rank, for each dataset
-# ---------------------------------------------------------------------------
 def main():
     requested_datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
     for d in requested_datasets:
@@ -425,13 +334,6 @@ def main():
                   f"({datamodule.dataset_info.labels}) -> c_dim={max(num_labels, 1)}, "
                   f"max_trace_length={datamodule.hparams.max_trace_length}")
 
-            # Defensive check: the FULL csv (read above, via get_dataset_attributes_info)
-            # determines dataset_info.labels / label2onehot. If the TRAIN/VAL/TEST split
-            # files were somehow generated or transferred separately and drifted out of
-            # sync with the full file (stale copy, partial re-extraction, manual edit,
-            # etc.), GenericDataset fails deep inside a KeyError on label2onehot[...] with
-            # no context. Catch that here instead, with an error that says exactly what's
-            # wrong and where to look.
             cfg_info = DATASET_CONFIG[dataset]
             split_dir = os.path.join(DATA_ROOT, f"data_{dataset}_rank{rank}", cfg_info["subfolder"])
             known_labels = set(datamodule.dataset_info.labels)

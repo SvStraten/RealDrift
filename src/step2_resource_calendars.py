@@ -1,22 +1,3 @@
-"""
-step2_resource_calendars.py
-
-Resource calendar discovery (subsection 4.1). Implements FIFO
-START->COMPLETE pairing, a weekly granule function, and
-confidence/support-based calendar discovery per resource.
-
-Only activities with SCHEDULE/START/COMPLETE lifecycle data (the W_*
-work items in BPIC12-style logs) can be calendared this way. A log with
-only instantaneous COMPLETE events has nothing for this step to pair,
-and discover_resource_profiles on such a log returns empty calendars for
-every resource. Callers (e.g. generate_drift_log.py) treat an
-empty/missing calendar as "no constraint".
-
-Usage:
-    df = load_and_prepare_log("BPIC12.xes")
-    instances = build_activity_instances(scope_to_lifecycle_activities(df))
-    alloc, avail, r_participation = discover_resource_profiles(instances)
-"""
 from __future__ import annotations
 
 from collections import Counter, deque
@@ -27,8 +8,6 @@ GRANULE_MINUTES_DEFAULT = 60
 
 
 def load_and_prepare_log(log_path: str) -> pd.DataFrame:
-    """Reads an XES log and renames columns to the plain names the rest of
-    this module expects. Requires pm4py."""
     import pm4py
 
     df = pm4py.read_xes(log_path)
@@ -42,11 +21,6 @@ def load_and_prepare_log(log_path: str) -> pd.DataFrame:
 
 
 def scope_to_lifecycle_activities(df: pd.DataFrame) -> pd.DataFrame:
-    """Restricts to activities that have genuine START/COMPLETE lifecycle
-    data (the W_* work items). If the log has no 'lifecycle' column, or no
-    activity ever logs a START, returns df unchanged with a printed
-    warning -- build_activity_instances will then treat every event as
-    instantaneous (see its own docstring)."""
     if "lifecycle" not in df.columns:
         print("[step2] no 'lifecycle' column found -- skipping W_* scoping, "
               "every event will be treated as instantaneous")
@@ -61,10 +35,6 @@ def scope_to_lifecycle_activities(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_activity_instances(df: pd.DataFrame) -> pd.DataFrame:
-    """FIFO-pair START -> COMPLETE within each (case, activity) group, in
-    chronological order. A COMPLETE with no pending START (including logs
-    with no 'lifecycle' column at all) is treated as instantaneous:
-    tau_s = tau_c."""
     instances = []
     has_lifecycle = "lifecycle" in df.columns
     for (case_id, activity), group in df.sort_values("timestamp").groupby(
@@ -86,7 +56,6 @@ def build_activity_instances(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def gamma(ts: pd.Timestamp, n: int = GRANULE_MINUTES_DEFAULT):
-    """Maps a timestamp onto its weekly granule: (weekday, slot_start, slot_end)."""
     weekday = ts.day_name()
     minute_of_day = ts.hour * 60 + ts.minute
     slot_idx = minute_of_day // n
@@ -107,7 +76,6 @@ def extract_calendar_entries(instances_r: pd.DataFrame, n: int = GRANULE_MINUTES
 
 
 def compute_r_participation(instances: pd.DataFrame) -> pd.Series:
-    """RParticipation(r) = sum_a |E_r,a| / sum_a max_r' |E_r',a|"""
     counts = instances.groupby(["resource", "activity"]).size()
     max_per_activity = counts.groupby("activity").max()
     participation = {}
@@ -167,16 +135,6 @@ def max_disjoint_intervals(events_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def to_composer_calendars(alloc, avail, all_resources, granule_minutes=GRANULE_MINUTES_DEFAULT):
-    """Converts this module's (alloc, avail) -- weekday-name/tuple calendar
-    entries -- into the integer week-slot format step6_drift_composer's
-    _in_calendar() expects (calendars: {key: set(int)}, pooled_resources:
-    set(str)). Always go through this adapter rather than passing `avail`
-    directly, since the tuple keys will not match the integer week-slot
-    lookup otherwise.
-
-    Requires granule_minutes to equal step6_drift_composer's
-    SLOT_MINUTES_DEFAULT (both default to 60).
-    """
     weekday_to_int = {"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
                        "Friday": 4, "Saturday": 5, "Sunday": 6}
     slots_per_day = 1440 // granule_minutes
@@ -200,11 +158,6 @@ def to_composer_calendars(alloc, avail, all_resources, granule_minutes=GRANULE_M
 
 def discover_resource_profiles(instances: pd.DataFrame, n: int = GRANULE_MINUTES_DEFAULT,
                                 d_supp: float = 0.7, d_conf: float = 0.1, d_part: float = 0.4):
-    """Returns (alloc, avail, r_participation):
-      alloc            - {resource: {activities it's individually calendared for}}
-      avail             - {resource_or_'__joint__<activity>': set of weekly slots}
-      r_participation   - pd.Series, RParticipation(r) per resource
-    """
     r_participation = compute_r_participation(instances)
     avail = {}
 

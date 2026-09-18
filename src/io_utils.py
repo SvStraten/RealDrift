@@ -1,22 +1,8 @@
-"""
-io_utils.py
-
-Shared CSV loading and export utilities used by trace pool generation
-output, arrival fitting, drift composition, and final log export.
-
-Column names are auto-detected among common XES-export variants (see
-CASE_COL_CANDIDATES etc. below). The loader raises a clear KeyError
-naming the columns it actually found if none of the candidates match.
-"""
 import re
 import warnings
 
 import numpy as np
 import pandas as pd
-
-# --------------------------------------------------------------------------
-# Loading
-# --------------------------------------------------------------------------
 
 CASE_COL_CANDIDATES = ["case:concept:name", "case_id", "Case ID", "CaseID", "case"]
 ACT_COL_CANDIDATES = ["concept:name", "activity", "Activity", "concept_name"]
@@ -29,13 +15,6 @@ _LIFECYCLE_SUFFIX_RE = re.compile(r"-(?:SCHEDULE|START|COMPLETE)$")
 
 
 def _keep_complete_lifecycle_only(df: pd.DataFrame, act_col: str, csv_path: str, verbose: bool) -> pd.DataFrame:
-    """Generated concept pools carry SCHEDULE/START/COMPLETE lifecycle rows
-    per activity (e.g. 'A_SUBMITTED-COMPLETE'), with SCHEDULE/START rows
-    sometimes carrying a different or 'UNKNOWN' resource than the COMPLETE
-    row for the same activity execution. Detects the suffix pattern and,
-    only if present, filters to COMPLETE rows and strips the suffix. A log
-    with no suffixed activity names (e.g. the real sublogs) passes through
-    unchanged."""
     activities = df[act_col].astype(str)
     if not activities.str.contains(_LIFECYCLE_SUFFIX_RE, regex=True).any():
         return df
@@ -68,16 +47,6 @@ def _detect_separator(csv_path):
 
 
 def load_pool(csv_path, concept_label=None, rename=None, verbose=True):
-    """Load one per-concept sublog CSV.
-
-    Returns (pool, arrival_times):
-      pool           - list of case dicts: {case_id, offsets (s, from case
-                       start), duration, activities, resources, concept}
-      arrival_times  - sorted pandas Series of each case's REAL first-event
-                       timestamp, straight from the file -- this is what
-                       fit_flat_kde/ATKDESampler should be fit on, since it
-                       reflects this concept's true arrival rate.
-    """
     rename = rename or {}
     sep = _detect_separator(csv_path)
     df = pd.read_csv(csv_path, sep=sep)
@@ -124,9 +93,6 @@ def load_pool(csv_path, concept_label=None, rename=None, verbose=True):
 
 
 def load_all_concepts(paths_by_label, rename=None, verbose=True):
-    """paths_by_label: {'C1': 'emergency_sublog_C1.csv', ...} (ordered dict
-    recommended -- concept order matters for composition). Returns
-    {'C1': (pool, arrivals), ...}."""
     out = {}
     for label, path in paths_by_label.items():
         out[label] = load_pool(path, concept_label=label, rename=rename, verbose=verbose)
@@ -135,10 +101,6 @@ def load_all_concepts(paths_by_label, rename=None, verbose=True):
 
 def build_log_df(placed, case_col="case:concept:name", act_col="concept:name",
                   time_col="time:timestamp", res_col="org:resource"):
-    """placed: [(case_dict, anchor_timestamp), ...] -> flat event-log
-    DataFrame, sorted by timestamp, with a unique case id per placement
-    (concept label + original case id, since the same real case id can
-    recur across the recurrent tier's two halves)."""
     rows = []
     for case, anchor in placed:
         new_case_id = f"{case['concept']}_{case['case_id']}"

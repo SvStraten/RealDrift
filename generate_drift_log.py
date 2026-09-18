@@ -1,29 +1,4 @@
-"""
-generate_drift_log.py
 
-Composes a synthetic drift log from:
-  - the real per-concept sublogs (data/sublogs/), used to fit each task's
-    arrival model (subsection 4.4)
-  - the pre-generated per-instance trace pools (data/concept_pools/),
-    produced by the TF-decoder (see external/tf_decoder/README.md for
-    how those were built; this script does not train or call the
-    TF-decoder itself)
-
-Composition tiers (subsection 5, Figure 3), selected via --tier:
-  - sudden:    T1, T2, ..., TK        chained with all-sudden transitions
-  - gradual:   T1, T2, ..., TK        chained with all-gradual transitions
-  - recurrent: T1^A..TK^A, T1^B..TK^B chained with all-sudden transitions
-sudden and gradual each use only the 'A' instance per concept; recurrent
-uses both instances, with all 2K-1 transitions sudden.
-
-Resource calendars (subsection 4.1 / 4.4) are optional: pass --calendars
-with the output of step2_resource_calendars.py to enable a resource-based
-feasibility constraint. Without it, every case is feasible once its
-arrival time is sampled, see README.md for the tradeoffs.
-
-Usage:
-    python generate_drift_log.py --config configs/bpic2012_config.yaml
-"""
 from __future__ import annotations
 
 import argparse

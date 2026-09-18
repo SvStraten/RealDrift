@@ -1,17 +1,3 @@
-"""
-step3_trace_clustering.py
-
-Trace clustering (subsection 4.2). Feature set: case-level fixed features
-(trace length, unique activities, unique resources, log duration, plus
-any extra case attribute columns) and activity-frequency features.
-
-Usage:
-    all_features = extract_all_features(df, extra_case_cols=["log_amount_req"])
-    case_ids = list(all_features.keys())
-    feature_dicts = [all_features[cid] for cid in case_ids]
-    concept_series, raw_results = get_final_concepts(feature_dicts, case_ids, "BPIC12")
-    export_sublogs(df, concept_series, "bpic12")
-"""
 from __future__ import annotations
 
 import os
@@ -25,16 +11,8 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-
-# --------------------------------------------------------------------------
-# Feature extraction
-# --------------------------------------------------------------------------
-
+#features
 def compute_fixed_features(trace_df, extra_case_cols=()) -> dict:
-    """Case-level numeric features: complexity/duration (from the event
-    sequence) plus any extra case attributes (already columns on trace_df,
-    constant per case -- e.g. age/gender_female for Emergency,
-    log_amount_req for BPIC12)."""
     activities, resources = trace_df["activity"].tolist(), trace_df["resource"].tolist()
     timestamps = trace_df["timestamp"].tolist()
     duration_hours = (timestamps[-1] - timestamps[0]).total_seconds() / 3600
@@ -51,7 +29,6 @@ def compute_fixed_features(trace_df, extra_case_cols=()) -> dict:
 
 
 def compute_act_features(trace_df) -> dict:
-    """Relative frequency of each activity within the trace."""
     activities = trace_df["activity"].tolist()
     n = len(activities)
     return {f"act::{act}": c / n for act, c in Counter(activities).items()}
@@ -62,15 +39,6 @@ def compute_trace_features(trace_df, extra_case_cols=()) -> dict:
 
 
 def extract_all_features(df, extra_case_cols=(), progress_every=5000):
-    """df must have columns: case_id, activity, resource, timestamp
-    [+ extra_case_cols]. Sorts by [case_id, timestamp] itself rather than
-    trusting the caller's row order, since compute_fixed_features's
-    duration calculation (timestamps[-1] - timestamps[0]) silently
-    produces incorrect results, including negative durations that make
-    log1p() return NaN, if a case's rows aren't in chronological order.
-    A dataframe sorted by [case_id, activity, timestamp] is chronological
-    within each activity but not across a case as a whole, and would
-    silently break this without the sort here."""
     df = df.sort_values(["case_id", "timestamp"])
     all_features = {}
     for i, (cid, trace_df) in enumerate(df.groupby("case_id", sort=False)):
@@ -80,16 +48,9 @@ def extract_all_features(df, extra_case_cols=(), progress_every=5000):
     return all_features
 
 
-# --------------------------------------------------------------------------
-# Clustering
-# --------------------------------------------------------------------------
-
 def cluster_pipeline(feature_dicts, name, target_variance=0.80, k_range=range(2, 21),
                       min_cluster_size=10, sample_size=3000, seed=42, verbose=True,
                       feature_weights=None):
-    """Vectorize -> scale -> (optionally reweight specific features) -> PCA
-    (sized to a variance target) -> pick k by silhouette, disqualifying any k
-    whose smallest cluster is below min_cluster_size -> final KMeans fit."""
     vectorizer = DictVectorizer(sparse=True)
     X = vectorizer.fit_transform(feature_dicts)
     X_dense = X.toarray()
@@ -147,10 +108,6 @@ def cluster_pipeline(feature_dicts, name, target_variance=0.80, k_range=range(2,
 
 
 def _assert_no_nan(X, vectorizer, name):
-    """Raises a clear, actionable error naming the offending feature(s)
-    instead of letting sklearn's PCA fail deep in its own validation code
-    with a generic "Input X contains NaN" that doesn't say which feature
-    or how many rows are affected."""
     if not np.isfinite(X).all():
         feat_names = np.array(vectorizer.get_feature_names_out())
         bad_cols = feat_names[~np.isfinite(X).all(axis=0)]
@@ -165,12 +122,6 @@ def _assert_no_nan(X, vectorizer, name):
 
 
 def cluster_fixed_k(feature_dicts, name, k, target_variance=0.80, seed=42, feature_weights=None, verbose=True):
-    """Same vectorize -> scale -> (optional reweight) -> PCA pipeline as
-    cluster_pipeline, but skips the silhouette sweep entirely and fits
-    KMeans at a caller-specified k directly. Use this to reproduce a
-    specific, already-known K (e.g. K=5 for BPIC12, as reported in the
-    paper) rather than let the pipeline re-select it, which can differ
-    run to run depending on scikit-learn version, min_cluster_size, etc."""
     vectorizer = DictVectorizer(sparse=True)
     X = vectorizer.fit_transform(feature_dicts)
     X_dense = X.toarray()
@@ -208,11 +159,6 @@ def cluster_fixed_k(feature_dicts, name, k, target_variance=0.80, seed=42, featu
 
 def get_final_concepts(feature_dicts, case_ids, name, min_cluster_size=10,
                         imbalance_ratio=0.3, seed=42, feature_weights=None):
-    """Cluster the full set. If the best k is 2 and heavily imbalanced (smaller
-    cluster < imbalance_ratio * larger), treat the smaller cluster as its own
-    concept and sub-cluster the larger one to get more than 2 concepts.
-    Otherwise use the top-level clusters directly. Final concepts are always
-    named C1..CK, ordered largest -> smallest."""
     top = cluster_pipeline(feature_dicts, f"{name}: top level", min_cluster_size=min_cluster_size,
                             seed=seed, feature_weights=feature_weights)
     labels_top = np.asarray(top["labels"])
@@ -241,14 +187,7 @@ def get_final_concepts(feature_dicts, case_ids, name, min_cluster_size=10,
     return concept_series, raw_results
 
 
-# --------------------------------------------------------------------------
-# Export
-# --------------------------------------------------------------------------
-
 def export_sublogs(df, concept_series, dataset_name, out_dir="."):
-    """Writes {dataset_name}_case_concepts.csv (case_id -> concept) and one
-    {dataset_name}_sublog_<concept>.csv per concept (full event rows for
-    that concept's cases). Returns a summary DataFrame of what was written."""
     os.makedirs(out_dir, exist_ok=True)
     case_concepts = concept_series.rename("concept").rename_axis("case_id").reset_index()
     case_concepts.to_csv(f"{out_dir}/{dataset_name}_case_concepts.csv", index=False)
