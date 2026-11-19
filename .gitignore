@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+outputs/
+data/calendars/*.pkl
+*.log
+.DS_Store

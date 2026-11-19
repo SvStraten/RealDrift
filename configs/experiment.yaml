@@ -1,0 +1,10 @@
+# Settings of scripts/run_composition.py, the evaluation runner reads the same streams.
+configs:
+  - configs/bpic2012_config.yaml
+  - configs/sepsis_config.yaml
+  - configs/emergency_config.yaml   # needs the private log, skipped when its files are missing
+tiers: [sudden, gradual, hard, recurrent]
+seeds: [0, 1, 2, 3, 4]              # evaluation seeds
+tuning_seeds: [100, 101, 102]       # used only to tune detector parameters, never reported
+out_dir: outputs/streams
+calendars: auto

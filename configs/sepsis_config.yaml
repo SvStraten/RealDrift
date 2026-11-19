@@ -1,0 +1,42 @@
+dataset: sepsis
+n_clusters: 2                       # K used for the paper
+t0: auto
+
+raw_log: data/raw/Sepsis.xes        # public, download from https://data.4tu.nl (Sepsis Cases - Event Log)
+columns:
+  case: case:concept:name
+  activity: concept:name
+  timestamp: time:timestamp
+  resource: org:group               # Sepsis has no org:resource, the department is the resource
+  lifecycle: lifecycle:transition
+
+sublogs_dir: data/sublogs
+concept_pools_dir: data/concept_pools
+
+calendars_cache: data/calendars/sepsis_calendars.pkl
+calendar_params:                    # re-run scripts/calendar_diagnostics.py and set d_supp for this log
+  granule_minutes: 60
+  d_supp: 0.99
+  d_conf: 0.1
+  d_part: 0.4
+
+use_atkde: true
+atkde_strict: false                 # Sepsis clusters are small, AT-KDE may fail. The manifest records any fallback
+                                    # per task. Set to true to make a fallback an error.
+
+clustering:
+  seed: 42
+  target_variance: 0.80
+  keep_lifecycle: all
+  case_attributes:
+    - {source: "case:Age", name: age, transform: none}
+
+unconstrained_resources: [UNKNOWN]   # placeholder for events without a resource, exempt from calendars and capacity
+
+composer:
+  gradual_window: 30
+  horizon_days: 21
+  max_preempt_evictions: 5
+  sa_iterations: 3000
+  resource_cap: 1
+  max_beds: null

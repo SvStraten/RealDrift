@@ -1,9 +1,0 @@
-configs:
-  - configs/bpic2012_config.yaml
-  - configs/sepsis_config.yaml
-  - configs/emergency_config.yaml   
-tiers: [sudden, gradual, hard, recurrent]
-seeds: [0, 1, 2, 3, 4]              
-tuning_seeds: [100, 101, 102]       
-out_dir: outputs/streams
-calendars: auto
