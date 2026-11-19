@@ -1,4 +1,4 @@
-# RealDrift
+# RealDrift: Multi-Perspective Drift Generation from Real Event Logs
 
 **Multi-perspective drift generation from real event logs.**
 
@@ -7,8 +7,6 @@ Real traces are grouped into concepts (trace clusters), a decoder produces a poo
 and a composer places the traces on a timeline so that resource calendars, resource capacity, arrival
 behaviour and optional global conditions stay feasible. The ground truth of every drift is derived from
 the final placements, so each stream comes with exact drift points or drift intervals.
-
-Accompanying paper: *RealDrift: Multi-Perspective Drift Generation from Real Event Logs* (SMA4PM workshop).
 
 ![RealDrift architecture](architecture.png)
 
