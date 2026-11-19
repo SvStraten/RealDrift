@@ -1,7 +1,5 @@
 # RealDrift: Multi-Perspective Drift Generation from Real Event Logs
 
-**Multi-perspective drift generation from real event logs.**
-
 RealDrift turns a real event log into event streams with controlled and labelled concept drifts.
 Real traces are grouped into concepts (trace clusters), a decoder produces a pool of traces per concept,
 and a composer places the traces on a timeline so that resource calendars, resource capacity, arrival
@@ -9,40 +7,6 @@ behaviour and optional global conditions stay feasible. The ground truth of ever
 the final placements, so each stream comes with exact drift points or drift intervals.
 
 ![RealDrift architecture](architecture.png)
-
-## Contents
-
-1. [What is in this repository](#what-is-in-this-repository)
-2. [Installation](#installation)
-3. [Data](#data)
-4. [Quick start](#quick-start)
-5. [Pipeline](#pipeline)
-6. [Reproducing the paper](#reproducing-the-paper)
-7. [Drift tiers and ground truth](#drift-tiers-and-ground-truth)
-8. [Seeds and reproducibility](#seeds-and-reproducibility)
-9. [Outputs](#outputs)
-10. [Drift detection evaluation](#drift-detection-evaluation)
-11. [Continual learning export](#continual-learning-export)
-12. [Configuration reference](#configuration-reference)
-13. [Repository layout](#repository-layout)
-14. [Tests](#tests)
-15. [Third-party components and references](#third-party-components-and-references)
-16. [Citation and licence](#citation-and-licence)
-
-## What is in this repository
-
-| Part | Included | Notes |
-|---|---|---|
-| Steps 1 to 3 (attributes, calendars, clustering) | yes | `src/step1` to `src/step3` |
-| Step 4 (trace pool generation) | wrapper only | needs the external TF-decoder, see [references](#third-party-components-and-references) |
-| Step 5 (arrival times) | adapter only | needs the external AT-KDE, see [references](#third-party-components-and-references) |
-| Step 6 (drift composer) | yes | preemption, gradual blending, simulated annealing |
-| Validation of every composition | yes | `src/validation.py` |
-| Drift detection evaluation | yes | PELT and Version Clustering wrappers, tuning, scoring |
-| Continual learning evaluation | export only | task-labelled export, training uses the external COMPASS |
-| Sepsis data, sublogs, pools, calendars | yes | `data/` |
-| BPIC 2012 data | no | download and prepare, see [Data](#data) |
-| Emergency data | no | private log, config documents the expected columns |
 
 ## Installation
 
@@ -56,12 +20,10 @@ pip install -r requirements.txt            # add requirements-dev.txt for the te
 Two optional external repositories are needed for some steps. Neither is vendored here.
 
 ```bash
-# AT-KDE arrival model (step 5). Either clone it to external/AT-KDE or point ATKDE_ROOT to it
 git clone https://github.com/konradoezdemir/AT-KDE.git external/AT-KDE
 pip install -r external/AT-KDE/requirements.txt
-export ATKDE_ROOT=$PWD/external/AT-KDE      # only needed for another location
+export ATKDE_ROOT=$PWD/external/AT-KDE      
 
-# TF-decoder (step 4 only). Pass --repo-path or set TF_DECODER_REPO_PATH
 git clone https://github.com/perdikon/TF-decoder.git ../TF-decoder
 export TF_DECODER_REPO_PATH=$PWD/../TF-decoder
 ```
@@ -80,8 +42,6 @@ train new decoders. The shipped Sepsis pools let you compose streams without it.
 To use BPIC 2012, download the complete log, save it as `data/raw/BPIC12_complete.xes` and run
 `scripts/prepare_dataset.py` (see below) to create the clusters and calendars. The trace pools
 (`data/concept_pools/generated_bpic12_rank{1..5}{A,B}.csv`) are produced by the TF-decoder in step 4.
-
-Calendar caches (`data/calendars/*.pkl`) and everything under `outputs/` are git-ignored.
 
 ## Quick start
 
