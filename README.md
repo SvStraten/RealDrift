@@ -31,6 +31,34 @@ export TF_DECODER_REPO_PATH=$PWD/../TF-decoder
 AT-KDE is required for every composition run with `use_atkde: true`. TF-decoder is only needed to
 train new decoders. The shipped Sepsis pools let you compose streams without it.
 
+## Results
+
+Detection results at the main tolerance (2 percent of the stream's time span), mean ± standard deviation over
+evaluation seeds 0 to 4. P is precision and R is recall. All 120 runs finished without detector errors.
+`results/detection_summary.csv` holds every tolerance (`span2`, `d14`, `w05`, `w1`, `w2`) with the number of
+runs, errors and ground-truth drifts. The tuned hyperparameters are written to `outputs/tuned_params.yaml`
+by the tuning phase.
+
+| Log | Tier | PELT (P / R / F1) | VC (P / R / F1) |
+|---|---|---|---|
+| Emergency | sudden | 0.87±0.18 / 0.80±0.18 / 0.83±0.17 | 0.75±0.28 / 0.80±0.30 / 0.77±0.28 |
+|  | gradual | 0.87±0.19 / 0.80±0.18 / 0.80±0.04 | 0.79±0.20 / 0.87±0.18 / 0.82±0.17 |
+|  | hard | 0.95±0.11 / 0.51±0.08 / 0.67±0.09 | 1.00±0.00 / 0.37±0.08 / 0.54±0.09 |
+|  | recurrent | 0.95±0.11 / 0.91±0.13 / 0.93±0.10 | 0.83±0.12 / 0.77±0.08 / 0.80±0.07 |
+| BPIC2012 | sudden | 0.74±0.13 / 0.90±0.22 / 0.81±0.17 | 0.85±0.14 / 0.85±0.14 / 0.85±0.14 |
+|  | gradual | 0.80±0.00 / 1.00±0.00 / 0.89±0.00 | 0.95±0.11 / 0.95±0.11 / 0.95±0.11 |
+|  | hard | 0.92±0.08 / 0.69±0.05 / 0.78±0.03 | 0.95±0.11 / 0.47±0.12 / 0.62±0.12 |
+|  | recurrent | 0.92±0.05 / 0.98±0.05 / 0.95±0.04 | 0.95±0.06 / 0.87±0.05 / 0.91±0.05 |
+| Sepsis | sudden | 1.00±0.00 / 1.00±0.00 / 1.00±0.00 | 1.00±0.00 / 1.00±0.00 / 1.00±0.00 |
+|  | gradual | 0.90±0.22 / 1.00±0.00 / 0.93±0.15 | 0.90±0.22 / 1.00±0.00 / 0.93±0.15 |
+|  | hard | 0.80±0.45 / 0.27±0.15 / 0.40±0.22 | 0.70±0.30 / 0.53±0.18 / 0.60±0.22 |
+|  | recurrent | 1.00±0.00 / 1.00±0.00 / 1.00±0.00 | 0.65±0.25 / 0.73±0.28 / 0.69±0.26 |
+
+Both detectors are precise on the hard tier but miss many drifts, so recall drives the lower F1.
+Sepsis has only one ground-truth drift for sudden and gradual streams and three for hard and recurrent
+streams, so its standard deviations are large.
+
+
 ## Data
 
 | Log | Source | Status in this repo |
