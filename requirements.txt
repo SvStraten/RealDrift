@@ -1,7 +1,0 @@
-pandas>=2.0
-numpy
-scipy
-pyyaml
-pm4py
-KDEpy
-scikit-learn

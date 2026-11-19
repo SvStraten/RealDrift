@@ -1,0 +1,41 @@
+dataset: bpic12
+n_clusters: 5                       
+t0: auto                            
+
+raw_log: data/raw/BPIC12_complete.xes
+columns:                            
+  case: case:concept:name
+  activity: concept:name
+  timestamp: time:timestamp
+  resource: org:resource
+  lifecycle: lifecycle:transition
+
+sublogs_dir: data/sublogs
+concept_pools_dir: data/concept_pools
+
+calendars_cache: data/calendars/bpic12_calendars.pkl
+calendar_params:                    
+  granule_minutes: 60
+  d_supp: 0.99                      
+  d_conf: 0.1
+  d_part: 0.4
+
+use_atkde: true
+atkde_strict: true                  
+
+clustering:                         
+  seed: 42
+  target_variance: 0.80
+  keep_lifecycle: complete          
+  case_attributes:
+    - {source: "case:AMOUNT_REQ", name: log_amount_req, transform: log1p}
+
+unconstrained_resources: [UNKNOWN]   
+
+composer:
+  gradual_window: 30
+  horizon_days: 21
+  max_preempt_evictions: 5
+  sa_iterations: 3000
+  resource_cap: 1
+  max_beds: null

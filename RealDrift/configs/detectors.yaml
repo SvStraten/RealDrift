@@ -1,0 +1,32 @@
+
+detectors:
+  pelt:                                   
+    module: evaluation.detector_pelt
+    params: {window_days: 7, penalty: 0.1, min_features: 1, merge_windows: 1}
+    grid:                                 # searched on the tuning seeds, selected by mean F1
+      penalty: [0.1, 0.2, 0.5, 1.0, 2.0]
+      min_features: [1, 3, 5, 8]
+      merge_windows: [1, 2, 4]
+    per_dataset_grid:                     
+      sepsis: {window_days: [14, 30]}
+      emergency: {window_days: [14, 30]}
+  vc:                                     
+    module: evaluation.detector_vc
+    params: {n_windows: 75, min_cluster_size: 5, pen: 1.0}
+    grid:
+      n_windows: [50, 75, 100]
+      min_cluster_size: [3, 5, 10]
+      pen: [0.5, 1.0, 1.5]
+    per_dataset:                          #
+      sepsis: {n_windows: 25, min_cluster_size: 3}
+    per_dataset_grid:                     
+      sepsis: {n_windows: [10, 15, 25], min_cluster_size: [2, 3, 5]}
+
+tolerances:
+  - {name: span2, unit: span_fraction, value: 0.02}
+  - {name: d14, unit: days, value: 14}
+  - {name: w1, unit: windows, value: 1}         
+  - {name: w05, unit: windows, value: 0.5}
+  - {name: w2, unit: windows, value: 2}
+
+errors_count_as_failure: true    
