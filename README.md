@@ -114,9 +114,6 @@ All commands run from the repository root. Steps marked *external* need the thir
    Write its console log outside of cloud-synced folders, since blocked log writes can stall the run.
 6. **Export the continual learning tasks** for COMPASS, see [below](#continual-learning-export).
 
-The notebooks in `notebooks/` run the same experiments interactively
-(`realdrift_bpic12.ipynb`, `realdrift_bpic12_experiment.ipynb`, `realdrift_all_datasets_experiment.ipynb`).
-
 ## Drift tiers and ground truth
 
 | Tier | Structure | Ground truth |
@@ -125,29 +122,6 @@ The notebooks in `notebooks/` run the same experiments interactively
 | gradual | One A instance per task, gradual blending (w = 30) | Interval from the first start of the incoming to the last start of the outgoing instance |
 | recurrent | A of all tasks, then B of all tasks, all sudden | 2K - 1 sudden points |
 | hard | R1A, R1B, R2A, ... sudden within a task, gradual between tasks | Points and intervals |
-
-## Seeds and reproducibility
-
-Composition uses `2*seed` and simulated annealing `2*seed+1`. Instance `k` is shuffled with `1000*seed+k` and
-owns an AT-KDE sampler seeded the same way. Decoders and pools are fixed across seeds. Seeds 0 to 4 are used
-for evaluation and seeds 100 to 102 only for tuning the detectors. Every run writes its parameters, seeds,
-environment and runtime to a manifest.
-
-## Outputs
-
-Per composed stream, written to `out_dir`:
-
-| File | Content |
-|---|---|
-| `{dataset}_{tier}_seed{seed}_drift_log.csv` | The composed event log |
-| `..._transitions.csv` | Ground truth (drift_id, from, to, type, start_ts, end_ts, n_overlap) |
-| `..._manifest.json` | Parameters, calendars, arrival model use and fallbacks, delays, validation, environment, runtime |
-| `....xes` | Optional XES export for the detectors (`--export-xes`) |
-| `..._excluded.csv` | Cases that could not be placed within the horizon |
-
-Resource `UNKNOWN` is a placeholder for missing values. It is excluded from calendar discovery and is
-unconstrained in the composer (`unconstrained_resources`). Every other resource, including system accounts,
-has capacity one.
 
 ## Drift detection evaluation
 
@@ -176,40 +150,6 @@ python evaluation/export_cl_tasks.py outputs/streams/eval/bpic12_sudden_seed0 --
 
 writes the task-labelled events that are fed to COMPASS. Training and evaluating COMPASS is done with its own code.
 
-## Configuration reference
-
-Each file in `configs/` sets `dataset`, `n_clusters`, `t0` (`auto` is the earliest real arrival), `raw_log`,
-`columns`, `sublogs_dir`, `concept_pools_dir`, `calendars_cache`, `calendar_params`, `use_atkde`,
-`atkde_strict`, `clustering`, `unconstrained_resources` and `composer` (`gradual_window`, `horizon_days`,
-`max_preempt_evictions`, `sa_iterations`, `resource_cap`, `max_beds`).
-`configs/experiment.yaml` lists the datasets, tiers and seeds, and `configs/detectors.yaml` the detectors,
-grids and tolerances. The Emergency log is private, so its config documents the expected columns only.
-
-## Repository layout
-
-```
-configs/            dataset, experiment and detector settings
-data/               Sepsis raw log, sublogs, trace pools and calendars
-evaluation/         detector wrappers, tuning and scoring, CL export
-  pelt_impl/        PELT based detector (Adams et al.)
-  vc_impl/          Version Clustering (Abarca Zúñiga et al.), MIT licence
-notebooks/          interactive versions of the experiments
-scripts/            prepare_dataset, calendar_diagnostics, run_composition
-src/                pipeline steps 1 to 6, validation, I/O and the AT-KDE adapter
-tests/              unit and integration tests
-generate_drift_log.py   compose one stream
-```
-
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-The tests cover composition and validation, scoring and tolerances, detectors, I/O and AT-KDE seeding.
-Tests that need AT-KDE use `external/AT-KDE` or `$ATKDE_ROOT`.
-
 ## Third-party components and references
 
 RealDrift builds on the following work. Code marked *not included* must be obtained from its authors.
@@ -232,8 +172,3 @@ in particular volume, page and URL details of COMPASS, VC and TF-decoder.
 
 If you use one of these components through RealDrift, please cite the original work as well.
 
-## Citation and licence
-
-If you use RealDrift, please cite the paper above. Add a `LICENSE` file for your own code before making the
-repository public. The licence of the vendored Version Clustering code is kept in `evaluation/vc_impl/LICENSE`.
-The PELT wrapper in `evaluation/pelt_impl` has no licence file of its own, so check its terms with the original authors.
